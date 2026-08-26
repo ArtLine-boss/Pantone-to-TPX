@@ -325,6 +325,7 @@
   <div class="tabs" id="tabs">
     <button class="tab active" data-mode="code">По коду Pantone</button>
     <button class="tab" data-mode="color">По цвету / HEX / RGB</button>
+    <button class="tab" data-mode="cmyk">CMYK</button>
   </div>
 
   <!-- MODE: CODE -->
@@ -334,7 +335,7 @@
         <label class="field-label">Код Pantone</label>
         <input type="text" id="codeInput" placeholder="например: 185 C, 7455 C, 19-4052">
       </div>
-      <button class="btn" id="codeBtn" onclick="handleCodeSearch(); return false;">Найти TPX</button>
+      <button class="btn" id="codeBtn" onclick="handleCodeSearch(); return false;">Подобрать соответствие</button>
     </div>
     <div class="hint">Поддерживаются коды печатной палитры Solid Coated (<code>185 C</code>, <code>PMS 2995 C</code>) и коды TCX/TPX (<code>19-4052</code>).</div>
     <div class="error" id="codeError"></div>
@@ -352,10 +353,23 @@
         <input type="text" id="hexInput" placeholder="#B3123F или 179, 18, 63">
       </div>
       <div class="swatch-preview" id="colorSwatchPreview" style="background:#b3123f;"></div>
-      <button class="btn" id="colorBtn" onclick="handleColorSearchClick(); return false;">Найти TPX</button>
+      <button class="btn" id="colorBtn" onclick="handleColorSearchClick(); return false;">Подобрать соответствие</button>
     </div>
     <div class="hint">Выберите цвет пипеткой или введите HEX / RGB вручную — совпадение обновится сразу.</div>
     <div class="error" id="colorError"></div>
+  </div>
+
+  <!-- MODE: CMYK -->
+  <div class="panel" id="panel-cmyk" style="display:none;">
+    <div class="input-row">
+      <div class="field">
+        <label class="field-label">CMYK (%)</label>
+        <input type="text" id="cmykInput" placeholder="например: 0, 90, 82, 4">
+      </div>
+      <button class="btn" id="cmykBtn" onclick="handleCmykSearchClick(); return false;">Подобрать соответствие</button>
+    </div>
+    <div class="hint">Введите через запятую C, M, Y, K в процентах (0–100), например <code>0, 90, 82, 4</code>. Пересчёт из CMYK в RGB условный (без цветового профиля печатной машины), поэтому используйте для ориентира.</div>
+    <div class="error" id="cmykError"></div>
   </div>
 
   <!-- RESULTS -->
@@ -369,6 +383,7 @@
         <div class="meta-grid">
           <div class="meta-item"><div class="k">HEX</div><div class="v" id="bestHex">—</div></div>
           <div class="meta-item"><div class="k">RGB</div><div class="v" id="bestRgb">—</div></div>
+          <div class="meta-item"><div class="k">CMYK</div><div class="v" id="bestCmyk">—</div></div>
           <div class="meta-item"><div class="k">Точность</div><div class="v" id="bestDe">—</div></div>
           <div class="meta-item"><div class="k">Оценка</div><div class="v" id="bestBadge">—</div></div>
         </div>
@@ -381,7 +396,7 @@
   </div>
 
   <div class="disclaimer">
-    <strong>Как это работает.</strong> Pantone TPX и TCX — один и тот же каталог Fashion, Home + Interiors (FHI), различаются только физическим носителем образца (бумага TPX / хлопок TCX), поэтому коду и оттенку совпадают. Официальных таблиц перевода печатной палитры PMS Solid Coated в TPX компания Pantone не публикует — цвета формируются по разным технологиям (краска для бумаги vs крашеная ткань), поэтому подбор ниже <strong>приближённый</strong>: цвет переводится в пространство Lab и для него ищется ближайший образец TPX/TCX по формуле ΔE (CIE76) среди 2310 цветов каталога FHI. Чем меньше ΔE, тем точнее совпадение (ΔE ≤ 2 — практически неотличимо на глаз). Для ответственных задач сверяйтесь с физическим веером Pantone — экранные и печатные цвета всегда отличаются от бумажного/тканевого оригинала.
+    <strong>Как это работает.</strong> Pantone TPX и TCX — один и тот же каталог Fashion, Home + Interiors (FHI), различаются только физическим носителем образца (бумага TPX / хлопок TCX), поэтому коду и оттенку совпадают. Официальных таблиц перевода печатной палитры PMS Solid Coated в TPX компания Pantone не публикует — цвета формируются по разным технологиям (краска для бумаги vs крашеная ткань), поэтому подбор ниже <strong>приближённый</strong>: цвет переводится в пространство Lab и для него ищется ближайший образец TPX/TCX по формуле ΔE (CIE76) среди 2310 цветов каталога FHI. Чем меньше ΔE, тем точнее совпадение (ΔE ≤ 2 — практически неотличимо на глаз). Значения CMYK считаются по стандартной формуле RGB↔CMYK без учёта ICC-профиля конкретной печатной машины — реальный результат на бумаге может отличаться. Для ответственных задач сверяйтесь с физическим веером Pantone — экранные и печатные цвета всегда отличаются от бумажного/тканевого оригинала.
   </div>
 
 </div>
@@ -402,6 +417,22 @@ function hexToRgb(hex){
 }
 function rgbToHex(r,g,b){
   return [r,g,b].map(v=>v.toString(16).padStart(2,'0')).join('');
+}
+function rgbToCmyk(r,g,b){
+  const rr=r/255, gg=g/255, bb=b/255;
+  const k = 1 - Math.max(rr,gg,bb);
+  if(k >= 1){ return [0,0,0,100]; }
+  const c = (1-rr-k)/(1-k);
+  const m = (1-gg-k)/(1-k);
+  const y = (1-bb-k)/(1-k);
+  return [c,m,y,k].map(v=>Math.round(v*100));
+}
+function cmykToRgb(c,m,y,k){
+  c/=100; m/=100; y/=100; k/=100;
+  const r = 255*(1-c)*(1-k);
+  const g = 255*(1-m)*(1-k);
+  const b = 255*(1-y)*(1-k);
+  return [r,g,b].map(v=>Math.max(0,Math.min(255,Math.round(v))));
 }
 function srgbToLinear(c){
   c/=255;
@@ -468,6 +499,8 @@ function renderResults(inputRgb, matches, eyebrowText){
   document.getElementById('bestHex').textContent = '#'+best.hex.toUpperCase();
   const rgb = hexToRgb(best.hex);
   document.getElementById('bestRgb').textContent = rgb.join(', ');
+  const cmyk = rgbToCmyk(rgb[0],rgb[1],rgb[2]);
+  document.getElementById('bestCmyk').textContent = cmyk.join(', ');
   document.getElementById('bestDe').textContent = 'ΔE ' + best.de.toFixed(1);
   const badgeEl = document.getElementById('bestBadge');
   badgeEl.innerHTML = `<span class="match-badge" style="color:${q.color};background:${q.bg}">${q.label}</span>`;
@@ -517,6 +550,7 @@ document.querySelectorAll('.tab').forEach(tab=>{
     const mode = tab.dataset.mode;
     document.getElementById('panel-code').style.display = mode==='code' ? 'block' : 'none';
     document.getElementById('panel-color').style.display = mode==='color' ? 'block' : 'none';
+    document.getElementById('panel-cmyk').style.display = mode==='cmyk' ? 'block' : 'none';
   });
 });
 
@@ -649,6 +683,38 @@ document.getElementById('colorPicker').addEventListener('input', e=>{
 document.getElementById('colorBtn').addEventListener('click', handleColorSearchClick);
 document.getElementById('hexInput').addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); handleColorSearchClick(); } });
 document.getElementById('codeInput').addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); } });
+
+/* ---------------- CMYK lookup ---------------- */
+function parseCmykInput(raw){
+  raw = fixLookalikes(raw).trim();
+  if(!raw) return null;
+  const nums = raw.match(/(\d{1,3}(?:\.\d+)?)/g);
+  if(!nums || nums.length < 4) return null;
+  const [c,m,y,k] = nums.slice(0,4).map(v=>Math.max(0,Math.min(100,parseFloat(v))));
+  return [c,m,y,k];
+}
+
+function handleCmykSearchClick(){
+  try{
+  const errEl = document.getElementById('cmykError');
+  errEl.classList.remove('show');
+  const cmyk = parseCmykInput(document.getElementById('cmykInput').value);
+  if(!cmyk){
+    errEl.textContent = 'Не удалось распознать значения. Введите 4 числа 0–100 через запятую: C, M, Y, K (например: 0, 90, 82, 4).';
+    errEl.classList.add('show');
+    return;
+  }
+  const rgb = cmykToRgb(cmyk[0],cmyk[1],cmyk[2],cmyk[3]);
+  const matches = findNearestTPX(rgb[0],rgb[1],rgb[2], 9);
+  renderResults(rgb, matches, `Ближайшее совпадение TPX для CMYK ${cmyk.map(v=>Math.round(v)).join('/')}`);
+  }catch(err){
+    const errEl = document.getElementById('cmykError');
+    errEl.textContent = 'Произошла ошибка: ' + (err && err.message ? err.message : err);
+    errEl.classList.add('show');
+  }
+}
+document.getElementById('cmykBtn').addEventListener('click', handleCmykSearchClick);
+document.getElementById('cmykInput').addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); handleCmykSearchClick(); } });
 
 /* ---------------- Initial demo ---------------- */
 window.addEventListener('load', ()=>{
